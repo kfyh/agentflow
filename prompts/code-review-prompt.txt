@@ -1,0 +1,89 @@
+# Code Smell & Dependency Analysis
+
+Analyze the TypeScript source files that will be included in the build output — typically those under `src/` or equivalent source directories, excluding tests, test utilities, and any external or monorepo dependencies.
+
+## Scope
+
+This prompt targets **one package at a time**. If working inside a monorepo, do not scan the entire repository as a single codebase. Instead:
+1. First perform a **shallow package-level dependency pass** to identify which packages depend on which (using `package.json` files only — no deep file scanning at this stage).
+2. Then perform **deep per-package analysis** (file-level imports, complexity, smells) on each package individually and in isolation.
+3. Do **not** follow or resolve cross-package imports during file-level analysis. Treat internal monorepo package references as opaque external boundaries.
+
+## Constraints & Permitted Actions (Read First)
+- **DO NOT** run `npm run`, `npm test`, or compile/build the project.
+- **DO NOT** run any `git` commands.
+- **DO NOT** scan across package boundaries during file-level analysis — this causes timeouts.
+- **YOU MUST** write and execute custom static analysis scripts for every structural or graph-based finding (dependency cycles, complexity scores, import maps). Never derive these from reading code tokens alone — scripted analysis is mandatory, not optional.
+- If a script times out or errors, record partial results and move on to the next package rather than retrying or expanding scope.
+- Restrict yourself to reading files, writing and executing your analysis scripts, and writing the final report.
+
+## Key Analysis Objectives
+
+1. **Circular Dependencies**:
+   - Identify dependency paths that form closed loops (e.g., File A -> File B -> File C -> File A).
+   - Scan for both standard ES6 imports (`import ... from "./path"`) and dynamic/lazy CommonJS imports (`require("./path")`), which are often introduced to bypass TypeScript compiler circular dependency errors.
+   - Trace and list every file transition in each cycle.
+   - Scope: intra-package file imports only. Do not follow imports that resolve outside the current package's source directory.
+
+2. **Cyclomatic Complexity**:
+   - Find methods, functions, or constructors with excessively high control flow branches (threshold: cyclomatic complexity > 15).
+   - Count control structures (`if`, `else`, `switch`, `case`, `for`, `while`, `catch`, `&&`, `||`) to identify complex logic hotspots that need refactoring.
+
+3. **SOLID Principle Violations**:
+   - **Single Responsibility (SRP)**: Identify classes that combine unrelated responsibilities.
+   - **Open/Closed (OCP)**: Find methods that switch over concrete type-check strings or enums to execute specific logic instead of utilizing polymorphism or dynamic dispatch.
+   - **Liskov Substitution (LSP)**: Spot cases where subclasses use type-casting (e.g., `as any`, `as unknown`) to bypass TypeScript's type system, or throw exceptions/stubs for interface methods.
+   - **Interface Segregation (ISP)**: Look for large interfaces that force implementing classes to leave methods empty or unused.
+   - **Dependency Inversion (DIP)**: Check for direct coupling to global instances or singletons instead of using parameter injection or abstraction.
+
+4. **Clean Architecture & Design-Level Smells**:
+   - **Boundary Violations (Layer Leakage)**: Check if core domain/business logic modules are importing lower-level implementation details directly (e.g., a specific rendering library, I/O implementation, or infrastructure concern).
+   - **Feature Envy**: Detect methods that interact heavily with properties of other classes rather than their own, suggesting the method belongs inside the other class.
+   - **Inappropriate Intimacy (Law of Demeter)**: Identify long method chains reaching deep into another object's properties (e.g., `obj.a.b.c.d`), indicating high coupling.
+   - **Temporal Coupling**: Look for classes that require strict method execution ordering to function (e.g., `init()` -> `configure()` -> `start()`) instead of leveraging constructors or state transitions.
+   - **Leaky Abstractions**: Check if interfaces leak implementation details of a specific library or framework.
+   - **Primitive Obsession**: Spot places where primitive types (`string`, `number`) are overused to represent distinct domain concepts (e.g., states, identifiers, units) instead of leveraging domain-specific types or Value Objects.
+
+5. **Shallow Package-Level Dependency Map (Monorepo only, first pass)**:
+   - Read each package's `package.json` to build a package-to-package dependency graph.
+   - Identify any circular dependencies at the package level only.
+   - Do not descend into source files during this pass.
+   - Use the results to determine analysis order (analyze packages with fewer dependencies first).
+
+## Methodology (CRITICAL)
+
+### General
+- **Do not rely on manual code reading or token prediction alone** to trace imports, count complexity, or detect cycles. This is prone to hallucination and must be backed by script output.
+- Ground all report findings in direct, verifiable data generated by your scripts.
+- **Exclude test and build files** from all analysis: test files (e.g., `*.test.ts`, `*.spec.ts`), test config files, mock files, build/tool configs, and `node_modules`.
+
+### Circular Dependency Detection
+For circular dependency detection, **use an established AST-based tool** rather than writing a custom script or using regex. Prefer in this order:
+1. **`dependency-cruiser`** — if the package has architecture boundary rules to enforce (layer violations, forbidden imports).
+2. **`dpdm`** — if the package uses `tsconfig` path aliases.
+3. **`madge`** — otherwise (fastest, simplest).
+
+Regex or string-based import scanning is **explicitly forbidden** — it produces false negatives on re-exports, type-only imports, aliased paths, and dynamic imports. Run the chosen tool scoped to the package's source directory only.
+
+### Complexity & Smell Analysis
+- Use or write custom scripts (e.g., using `ts-morph` in TypeScript, or Python using `ast` / filesystem traversal) to count complexity tokens and detect structural patterns.
+- Scope each script to a single package's source directory.
+- Set a safety limit: abort if nodes visited exceed 5000, to prevent script hangs.
+- If a script still hangs or errors, record what was completed and skip to the next package.
+
+## Suggested Tools
+
+Prefer utilizing established, well-known libraries and tools rather than writing complex analysis logic entirely from scratch:
+- **`madge`**: The preferred tool for fast circular dependency detection and import mapping.
+- **`ts-morph`**: The preferred tool/library for robust, token-level TypeScript AST analysis (such as measuring cyclomatic complexity and scanning for code smells). Using `ts-morph` ensures high precision on edge cases like nested ternaries.
+
+## Deliverables
+
+Produce package-specific reports in `reports/<package_name>_code_smells.md`. Write and flush each report before moving to the next package to avoid losing progress.
+
+Each report must include:
+1. **Dependency Cycles**: A detailed list of all intra-package circular dependency paths found, from shortest to longest.
+2. **Complexity Hotspots**: A table of the top 10 most complex methods/functions (cyclomatic complexity > 15), including file path, line numbers, and complexity score.
+3. **SOLID Violations**: Specific instances of SRP, OCP, LSP, ISP, and DIP violations with code snippets and explanation.
+4. **Architectural & Clean Code Smells**: Details on Boundary Violations, Feature Envy, temporal coupling, leaky abstractions, and primitive obsession.
+5. **Refactoring Roadmap**: Specific, actionable recommendations to resolve the identified issues.
