@@ -1,4 +1,4 @@
-# run-agent.ps1 - Centralized Startup script for Windows (PowerShell)
+﻿# run-agent.ps1 - Centralized Startup script for Windows (PowerShell)
 param (
     [Parameter(Position = 0, Mandatory = $false)]
     [string]$ProjectPath,
@@ -12,10 +12,10 @@ param (
     [Alias("p")]
     [string]$Prompt = "",
 
-    [Alias("v", "verbose")]
+    [Alias("v")]
     [switch]$VerboseMode,
 
-    [Alias("t", "tui")]
+    [Alias("t")]
     [switch]$Tui,
 
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -169,6 +169,26 @@ if (-not $IsEnvAuth) {
 $VolumeArgs = @()
 foreach ($vol in $Config.Volumes) {
     $VolumeArgs += @("-v", $vol)
+}
+
+# Check if Docker Image exists locally, build if missing
+$ImageFullName = "$($Config.ImageName):$($Config.Tag)"
+$ImageId = docker images -q $ImageFullName 2>$null
+if (-not $ImageId) {
+    Write-Host "⚠️  Docker image '$ImageFullName' not found locally." -ForegroundColor Yellow
+    $DockerfilePath = Join-Path $ScriptDir $Container
+    if (Test-Path -Path $DockerfilePath -PathType Container) {
+        Write-Host "🔨 Building Docker image '$ImageFullName' from $DockerfilePath..." -ForegroundColor Cyan
+        & docker build -t $ImageFullName $DockerfilePath
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Failed to build Docker image '$ImageFullName'."
+            exit 1
+        }
+        Write-Host "✅ Docker image '$ImageFullName' built successfully!" -ForegroundColor Green
+    } else {
+        Write-Error "❌ Dockerfile directory not found at $DockerfilePath. Cannot build image."
+        exit 1
+    }
 }
 
 Write-Host "🚀 Starting Coder Container [Engine: $($Config.ImageName)]..."

@@ -189,6 +189,25 @@ if [ "$HAS_PROMPT" = true ]; then
   fi
 fi
 
+# Check if Docker Image exists locally, build if missing
+IMAGE_FULL_NAME="$IMAGE_NAME:$TAG"
+if [ -z "$(docker images -q "$IMAGE_FULL_NAME" 2>/dev/null)" ]; then
+  echo "⚠️  Docker image '$IMAGE_FULL_NAME' not found locally."
+  DOCKERFILE_PATH="$SCRIPT_DIR/$ENGINE"
+  if [ -d "$DOCKERFILE_PATH" ]; then
+    echo "🔨 Building Docker image '$IMAGE_FULL_NAME' from $DOCKERFILE_PATH..."
+    docker build -t "$IMAGE_FULL_NAME" "$DOCKERFILE_PATH"
+    if [ $? -ne 0 ]; then
+      echo "❌ Failed to build Docker image '$IMAGE_FULL_NAME'."
+      exit 1
+    fi
+    echo "✅ Docker image '$IMAGE_FULL_NAME' built successfully!"
+  else
+    echo "❌ Error: Dockerfile directory not found at $DOCKERFILE_PATH. Cannot build image."
+    exit 1
+  fi
+fi
+
 echo "🚀 Starting Coder Container [Engine: $ENGINE]..."
 echo "📂 Mounting Host Path: $HOST_PATH -> /workspace ($WORKSPACE_MOUNT_FLAG)"
 echo "📺 Real-time terminal output active. Type 'exit' to quit."
