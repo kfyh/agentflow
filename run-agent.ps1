@@ -259,6 +259,14 @@ if ($HasPrompt -and -not $Tui -and $Config.StreamFormatter) {
 if ($LASTEXITCODE -ne 0) {
     Write-Host "--------------------------------------------------------"
     Write-Host "❌ Container exited with error code $LASTEXITCODE." -ForegroundColor Red
+    if ($Config.LogPath -and $Config.Volumes -and $Config.Volumes.Count -gt 0) {
+        $FirstVolumeMapping = $Config.Volumes[0]
+        $VolumeName = ($FirstVolumeMapping -split ":")[0]
+        $LogPath = $Config.LogPath
+        Write-Host "🔍 Extracting latest logs from Docker volume '$VolumeName'..." -ForegroundColor Cyan
+        $ShCommand = 'latest_log=$(ls -t /volume/' + $LogPath + ' 2>/dev/null | head -n 1); if [ -f $latest_log ]; then echo === Latest Logs: $latest_log ===; tail -n 100 $latest_log; fi'
+        & docker run --rm -v "${VolumeName}:/volume" alpine sh -c $ShCommand
+    }
     if (-not $IsEnvAuth) {
         Write-Host "💡 Troubleshooting: $($Config.TroubleshootingTip)" -ForegroundColor Yellow
     }

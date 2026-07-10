@@ -9,6 +9,7 @@ class TestRunner(unittest.TestCase):
         self.test_env = os.environ.copy()
         for key in ["GEMINI_API_KEY", "MISTRAL_API_KEY", "ANTHROPIC_API_KEY"]:
             self.test_env.pop(key, None)
+        self.test_env["AGENT_TESTING"] = "true"
 
     def test_bash_syntax(self):
         """Verifies that the central Bash runner has valid syntax."""
