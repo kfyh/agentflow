@@ -70,15 +70,33 @@ fi
 
 source "$CONF_FILE"
 
-# --- Docker Check ---
-if ! docker info >/dev/null 2>&1; then
-  echo "❌ Error: Docker daemon is not running."
-  if command -v colima >/dev/null 2>&1; then
-    echo "💡 Colima was detected on your machine. You can start it using:"
-    echo "   colima start"
+# --- Container Engine Detection ---
+CONTAINER_ENGINE="docker"
+if command -v podman >/dev/null 2>&1; then
+  if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+    if podman info >/dev/null 2>&1; then
+      CONTAINER_ENGINE="podman"
+    fi
   fi
-  exit 1
 fi
+
+if [ "$CONTAINER_ENGINE" = "podman" ]; then
+  if ! podman info >/dev/null 2>&1; then
+    echo "❌ Error: Podman is installed but not running or responsive."
+    exit 1
+  fi
+  echo "🐳 Using Podman container engine."
+else
+  if ! docker info >/dev/null 2>&1; then
+    echo "❌ Error: Docker daemon is not running."
+    if command -v colima >/dev/null 2>&1; then
+      echo "💡 Colima was detected on your machine. You can start it using:"
+      echo "   colima start"
+    fi
+    exit 1
+  fi
+fi
+
 
 # --- Resolve Host Path ---
 resolve_path() {
@@ -177,6 +195,20 @@ You are running in DESIGN & SPECIFICATION mode. The workspace is mounted as READ
   fi
 fi
 
+# --- Container Run Arguments & Mount Flags ---
+CONTAINER_RUN_ARGS=()
+if [ "$CONTAINER_ENGINE" = "podman" ]; then
+  CONTAINER_RUN_ARGS+=("--userns=keep-id")
+  if [[ "$WORKSPACE_MOUNT_FLAG" != *",z"* ]]; then
+    WORKSPACE_MOUNT_FLAG="${WORKSPACE_MOUNT_FLAG},z"
+  fi
+fi
+
+RUN_CMD=("$CONTAINER_ENGINE" run)
+if [ "$AGENT_TESTING" = "true" ] && [ "$IS_ENV_AUTH" = false ]; then
+  RUN_CMD=("false")
+fi
+
 if [ "$HAS_PROMPT" = true ]; then
   echo "📝 Prompt:"
   echo "$RAW_PROMPT"
@@ -189,19 +221,19 @@ if [ "$HAS_PROMPT" = true ]; then
   fi
 fi
 
-# Check if Docker Image exists locally, build if missing
+# Check if Container Image exists locally, build if missing
 IMAGE_FULL_NAME="$IMAGE_NAME:$TAG"
-if [ -z "$(docker images -q "$IMAGE_FULL_NAME" 2>/dev/null)" ]; then
-  echo "⚠️  Docker image '$IMAGE_FULL_NAME' not found locally."
+if [ -z "$($CONTAINER_ENGINE images -q "$IMAGE_FULL_NAME" 2>/dev/null)" ]; then
+  echo "⚠️  Container image '$IMAGE_FULL_NAME' not found locally."
   DOCKERFILE_PATH="$SCRIPT_DIR/$ENGINE"
   if [ -d "$DOCKERFILE_PATH" ]; then
-    echo "🔨 Building Docker image '$IMAGE_FULL_NAME' from $DOCKERFILE_PATH..."
-    docker build -t "$IMAGE_FULL_NAME" "$DOCKERFILE_PATH"
+    echo "🔨 Building Container image '$IMAGE_FULL_NAME' from $DOCKERFILE_PATH..."
+    $CONTAINER_ENGINE build -t "$IMAGE_FULL_NAME" "$DOCKERFILE_PATH"
     if [ $? -ne 0 ]; then
-      echo "❌ Failed to build Docker image '$IMAGE_FULL_NAME'."
+      echo "❌ Failed to build Container image '$IMAGE_FULL_NAME'."
       exit 1
     fi
-    echo "✅ Docker image '$IMAGE_FULL_NAME' built successfully!"
+    echo "✅ Container image '$IMAGE_FULL_NAME' built successfully!"
   else
     echo "❌ Error: Dockerfile directory not found at $DOCKERFILE_PATH. Cannot build image."
     exit 1
@@ -233,7 +265,8 @@ fi
 if [ "$HAS_PROMPT" = true ]; then
   if [ "$TUI" = true ]; then
     echo "🤖 Executing: $CLI_COMMAND [prompt + guidelines] ${VERBOSE_FLAG:+(with $VERBOSE_FLAG)}"
-    docker run -it --rm \
+    "${RUN_CMD[@]}" -it --rm \
+      "${CONTAINER_RUN_ARGS[@]}" \
       -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
       "${ENV_ARGS[@]}" \
       "${VOLUMES[@]}" \
@@ -243,7 +276,8 @@ if [ "$HAS_PROMPT" = true ]; then
     if [ -n "$STREAM_FORMATTER" ]; then
       echo "🤖 Executing: $CLI_COMMAND -p [prompt + guidelines] (streaming real-time output)"
       set -o pipefail
-      docker run -i --rm \
+      "${RUN_CMD[@]}" -i --rm \
+        "${CONTAINER_RUN_ARGS[@]}" \
         -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
         "${ENV_ARGS[@]}" \
         "${VOLUMES[@]}" \
@@ -251,7 +285,8 @@ if [ "$HAS_PROMPT" = true ]; then
         "$CLI_COMMAND" "${CMD_ARGS[@]}" | python3 -u "$SCRIPT_DIR/$STREAM_FORMATTER"
     else
       echo "🤖 Executing: $CLI_COMMAND -p [prompt + guidelines] ${VERBOSE_FLAG:+(with $VERBOSE_FLAG)}"
-      docker run -it --rm \
+      "${RUN_CMD[@]}" -it --rm \
+        "${CONTAINER_RUN_ARGS[@]}" \
         -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
         "${ENV_ARGS[@]}" \
         "${VOLUMES[@]}" \
@@ -261,7 +296,8 @@ if [ "$HAS_PROMPT" = true ]; then
   fi
 else
   echo "🤖 Launching interactive CLI TUI..."
-  docker run -it --rm \
+  "${RUN_CMD[@]}" -it --rm \
+    "${CONTAINER_RUN_ARGS[@]}" \
     -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
     "${ENV_ARGS[@]}" \
     "${VOLUMES[@]}" \
@@ -273,6 +309,12 @@ EXIT_CODE=$?
 if [ $EXIT_CODE -ne 0 ]; then
   echo "--------------------------------------------------------"
   echo "❌ Container exited with error code $EXIT_CODE."
+  if [ -n "$LOG_PATH" ] && [ ${#VOLUMES[@]} -gt 1 ]; then
+    VOLUME_MAPPING="${VOLUMES[1]}"
+    VOLUME_NAME="${VOLUME_MAPPING%%:*}"
+    echo "🔍 Extracting latest logs from container volume '$VOLUME_NAME'..."
+    "$CONTAINER_ENGINE" run --rm -v "${VOLUME_NAME}:/volume" alpine sh -c 'latest_log=$(ls -t /volume/'"$LOG_PATH"' 2>/dev/null | head -n 1); if [ -f $latest_log ]; then echo === Latest Logs: $latest_log ===; tail -n 100 $latest_log; fi'
+  fi
   if [ "$IS_ENV_AUTH" = false ]; then
     echo "💡 Troubleshooting: $TROUBLESHOOTING_TIP"
   fi
