@@ -1,4 +1,4 @@
-﻿# run-agent.ps1 - Centralized Startup script for Windows (PowerShell)
+# run-agent.ps1 - Centralized Startup script for Windows (PowerShell)
 param (
     [Parameter(Position = 0, Mandatory = $false)]
     [string]$ProjectPath,
@@ -144,6 +144,25 @@ if ($HasPrompt) {
     $FirstLine = ($RawPrompt -split "`n")[0].Trim()
     if ($FirstLine.Length -gt 0 -and $FirstLine.Length -le 50) {
         $Host.UI.RawUI.WindowTitle = $FirstLine
+    }
+}
+
+# --- Load Local Env File if present (e.g. for Mistral) ---
+if ($Container -eq "mistral") {
+    $VibeEnvPath = Join-Path $HOME ".vibe\.env"
+    if (Test-Path -Path $VibeEnvPath -PathType Leaf) {
+        Get-Content $VibeEnvPath | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith("#")) {
+                if ($line -match "^([^=]+)=(.*)$") {
+                    $key = $Matches[1].Trim()
+                    $val = $Matches[2].Trim().Trim("'").Trim('"')
+                    if (-not (Get-Item -Path "env:$key" -ErrorAction SilentlyContinue)) {
+                        [System.Environment]::SetEnvironmentVariable($key, $val, [System.EnvironmentVariableTarget]::Process)
+                    }
+                }
+            }
+        }
     }
 }
 

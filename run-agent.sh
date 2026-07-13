@@ -80,6 +80,31 @@ if command -v podman >/dev/null 2>&1; then
   fi
 fi
 
+# --- Load Local Env File if present (e.g. for Mistral) ---
+if [ "$ENGINE" = "mistral" ]; then
+  VIBE_ENV="$HOME/.vibe/.env"
+  if [ -f "$VIBE_ENV" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      # Skip comments and empty lines
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ -z "$line" ]] && continue
+      # Parse key=value
+      if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+        key="${BASH_REMATCH[1]}"
+        val="${BASH_REMATCH[2]}"
+        # Strip outer quotes if any
+        val="${val#\"}"
+        val="${val%\"}"
+        val="${val#\'}"
+        val="${val%\'}"
+        if [ -z "${!key}" ]; then
+          export "$key"="$val"
+        fi
+      fi
+    done < "$VIBE_ENV"
+  fi
+fi
+
 if [ "$CONTAINER_ENGINE" = "podman" ]; then
   if ! podman info >/dev/null 2>&1; then
     echo "❌ Error: Podman is installed but not running or responsive."

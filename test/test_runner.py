@@ -124,6 +124,44 @@ class TestRunner(unittest.TestCase):
         self.assertIn("Executing: claude [prompt + guidelines]", result.stdout)
         self.assertNotIn("claude -p", result.stdout)
 
+    def test_mistral_env_file_loading(self):
+        """Verifies that ~/.vibe/.env is loaded and exports MISTRAL_API_KEY."""
+        import tempfile
+
+        # Create a temp directory to simulate $HOME
+        with tempfile.TemporaryDirectory() as temp_home:
+            vibe_dir = os.path.join(temp_home, ".vibe")
+            os.makedirs(vibe_dir)
+            env_file = os.path.join(vibe_dir, ".env")
+            
+            with open(env_file, "w") as f:
+                f.write("# This is a comment\n")
+                f.write("MISTRAL_API_KEY=mocked_key_from_env_file\n")
+                
+            # Symlink host's .docker and .colima directories so docker command can resolve sockets/contexts
+            original_home = os.environ.get("HOME")
+            if original_home:
+                for folder in [".docker", ".colima"]:
+                    src = os.path.join(original_home, folder)
+                    if os.path.exists(src):
+                        try:
+                            os.symlink(src, os.path.join(temp_home, folder))
+                        except Exception:
+                            pass
+
+            env = self.test_env.copy()
+            env["HOME"] = temp_home
+            env["USERPROFILE"] = temp_home
+
+            result = subprocess.run(
+                ["./run-agent.sh", "-c", "mistral", ".", "test"],
+                capture_output=True,
+                text=True,
+                env=env
+            )
+            
+            self.assertIn("Mode: API Key Authentication (MISTRAL_API_KEY detected)", result.stdout)
+
 if __name__ == '__main__':
     unittest.main()
 
