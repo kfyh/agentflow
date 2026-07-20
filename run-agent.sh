@@ -140,6 +140,29 @@ else
   echo "ℹ️  No project path specified. Defaulting to current directory: $HOST_PATH"
 fi
 
+# --- Branch Safety Check (single-repo, writable runs only) ---
+# Prevent an autonomous agent from editing the working tree while checked out on
+# a shared/default branch. Only runs when the mount root is itself a git repo
+# root and the workspace is writable (coder role); parent-dir/context mounts and
+# read-only design/spec runs skip this check.
+if [ "$ROLE" != "design" ] && [ "$ROLE" != "spec" ]; then
+  if git -C "$HOST_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
+     [ "$(git -C "$HOST_PATH" rev-parse --show-toplevel 2>/dev/null)" = "$HOST_PATH" ]; then
+    CURRENT_BRANCH=$(git -C "$HOST_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
+    case "$CURRENT_BRANCH" in
+      main|master|develop|development|trunk|release)
+        echo "🛑 Refusing to launch: workspace is on default/shared branch '$CURRENT_BRANCH'."
+        echo "💡 Switch to a working branch first, e.g.:"
+        echo "   git -C \"$HOST_PATH\" switch -c my-work-branch"
+        exit 1
+        ;;
+    esac
+    echo "🌿 Branch check OK: workspace on '$CURRENT_BRANCH'."
+  else
+    echo "ℹ️  Workspace is not a single git repo root — skipping branch safety check."
+  fi
+fi
+
 # --- Authentication Mode Check ---
 IS_ENV_AUTH=false
 ENV_ARGS=()

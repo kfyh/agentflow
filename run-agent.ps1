@@ -55,6 +55,39 @@ if ($ProjectPath) {
     Write-Host "ℹ️ No project path specified. Defaulting to current directory: $ResolvedPath"
 }
 
+# --- Branch Safety Check (single-repo, writable runs only) ---
+# Prevent an autonomous agent from editing the working tree while checked out on
+# a shared/default branch. Only runs when the mount root is itself a git repo
+# root and the workspace is writable (coder role); parent-dir/context mounts and
+# read-only design/spec runs skip this check.
+if (($Role -ne "design") -and ($Role -ne "spec") -and (Get-Command git -ErrorAction SilentlyContinue)) {
+    $IsRepoRoot = $false
+    git -C $ResolvedPath rev-parse --is-inside-work-tree > $null 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $TopLevel = (git -C $ResolvedPath rev-parse --show-toplevel 2>$null)
+        if ($TopLevel) { $TopLevel = $TopLevel.Trim() }
+        # git returns forward slashes; normalize the resolved path before comparing (case-insensitive by default)
+        if ($TopLevel -eq ($ResolvedPath -replace '\\', '/')) {
+            $IsRepoRoot = $true
+        }
+    }
+
+    if ($IsRepoRoot) {
+        $CurrentBranch = (git -C $ResolvedPath rev-parse --abbrev-ref HEAD 2>$null)
+        if ($CurrentBranch) { $CurrentBranch = $CurrentBranch.Trim() }
+        $DefaultBranches = @("main", "master", "develop", "development", "trunk", "release")
+        if ($DefaultBranches -contains $CurrentBranch) {
+            Write-Error "🛑 Refusing to launch: workspace is on default/shared branch '$CurrentBranch'."
+            Write-Host "💡 Switch to a working branch first, e.g.:"
+            Write-Host "   git -C `"$ResolvedPath`" switch -c my-work-branch"
+            exit 1
+        }
+        Write-Host "🌿 Branch check OK: workspace on '$CurrentBranch'."
+    } else {
+        Write-Host "ℹ️  Workspace is not a single git repo root — skipping branch safety check."
+    }
+}
+
 # Parse Prompt
 $RawPrompt = $Prompt
 $HasPrompt = $false
