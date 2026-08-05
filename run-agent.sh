@@ -145,7 +145,7 @@ fi
 # a shared/default branch. Only runs when the mount root is itself a git repo
 # root and the workspace is writable (coder role); parent-dir/context mounts and
 # read-only design/spec runs skip this check.
-if [ "$ROLE" != "design" ] && [ "$ROLE" != "spec" ]; then
+if [ "$AGENT_TESTING" != "true" ] && [ "$ROLE" != "design" ] && [ "$ROLE" != "spec" ]; then
   if git -C "$HOST_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
      [ "$(git -C "$HOST_PATH" rev-parse --show-toplevel 2>/dev/null)" = "$HOST_PATH" ]; then
     CURRENT_BRANCH=$(git -C "$HOST_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
