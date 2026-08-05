@@ -303,7 +303,11 @@ fi
 
 echo "🚀 Starting Coder Container [Engine: $ENGINE]..."
 echo "📂 Mounting Host Path: $HOST_PATH -> /workspace ($WORKSPACE_MOUNT_FLAG)"
-echo "📺 Real-time terminal output active. Type 'exit' to quit."
+if [ "$HAS_PROMPT" = true ] && [ "$TUI" != true ]; then
+  echo "📺 Real-time terminal output active."
+else
+  echo "📺 Real-time terminal output active. Type 'exit' to quit."
+fi
 echo "--------------------------------------------------------"
 
 # Run the docker container
@@ -313,7 +317,10 @@ if [ "$HAS_PROMPT" = true ]; then
     CMD_ARGS+=("$FINAL_PROMPT")
   else
     if [ -n "$STREAM_FORMATTER" ]; then
-      CMD_ARGS+=("-p" "$FINAL_PROMPT" "--output-format" "stream-json" "--verbose")
+      CMD_ARGS+=("-p" "$FINAL_PROMPT" "--output-format" "stream-json")
+      if [ -n "$VERBOSE_FLAG" ]; then
+        CMD_ARGS+=("$VERBOSE_FLAG")
+      fi
     else
       CMD_ARGS+=("-p" "$FINAL_PROMPT")
     fi
@@ -337,13 +344,17 @@ if [ "$HAS_PROMPT" = true ]; then
     if [ -n "$STREAM_FORMATTER" ]; then
       echo "🤖 Executing: $CLI_COMMAND -p [prompt + guidelines] (streaming real-time output)"
       set -o pipefail
-      "${RUN_CMD[@]}" -i --rm \
+      STDBUF_PREFIX=""
+      if command -v stdbuf >/dev/null 2>&1; then
+        STDBUF_PREFIX="stdbuf -oL"
+      fi
+      $STDBUF_PREFIX "${RUN_CMD[@]}" -it --rm \
         "${CONTAINER_RUN_ARGS[@]}" \
         -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
         "${ENV_ARGS[@]}" \
         "${VOLUMES[@]}" \
         "$IMAGE_NAME:$TAG" \
-        "$CLI_COMMAND" "${CMD_ARGS[@]}" | python3 -u "$SCRIPT_DIR/$STREAM_FORMATTER"
+        "$CLI_COMMAND" "${CMD_ARGS[@]}" < /dev/null | python3 -u "$SCRIPT_DIR/$STREAM_FORMATTER"
     else
       echo "🤖 Executing: $CLI_COMMAND -p [prompt + guidelines] ${VERBOSE_FLAG:+(with $VERBOSE_FLAG)}"
       "${RUN_CMD[@]}" -it --rm \

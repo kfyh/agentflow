@@ -2,6 +2,7 @@
     ImageName          = "agentic-coder"
     Tag                = "latest"
     CliCommand         = "agy"
+    StreamFormatter    = "gemini/stream-formatter.py"
     EnvVars            = @("GEMINI_API_KEY")
     Volumes            = @(
         "agentic-coder-gemini:/home/node/.gemini",

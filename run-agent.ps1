@@ -245,7 +245,11 @@ if (-not $ImageId) {
 
 Write-Host "🚀 Starting Coder Container [Engine: $($Config.ImageName)]..."
 Write-Host "📂 Mounting Host Path: $ResolvedPath -> /workspace ($WorkspaceMountFlag)"
-Write-Host "📺 Real-time terminal output active. Type 'exit' to quit."
+if ($HasPrompt -and -not $Tui) {
+    Write-Host "📺 Real-time terminal output active."
+} else {
+    Write-Host "📺 Real-time terminal output active. Type 'exit' to quit."
+}
 Write-Host "--------------------------------------------------------"
 
 # Assemble docker execution arguments
@@ -264,7 +268,10 @@ if ($HasPrompt) {
         $CmdArgs += $FinalPrompt
     } else {
         if ($Config.StreamFormatter) {
-            $CmdArgs += @("-p", $FinalPrompt, "--output-format", "stream-json", "--verbose")
+            $CmdArgs += @("-p", $FinalPrompt, "--output-format", "stream-json")
+            if ($Config.VerboseFlag) {
+                $CmdArgs += $Config.VerboseFlag
+            }
         } else {
             $CmdArgs += @("-p", $FinalPrompt)
         }
@@ -302,8 +309,8 @@ $DockerArgs += $CmdArgs
 # Run docker
 if ($HasPrompt -and -not $Tui -and $Config.StreamFormatter) {
     $FormatterPath = Join-Path $ScriptDir $Config.StreamFormatter
-    $DockerArgs[1] = "-i"
-    & docker $DockerArgs | python3 -u $FormatterPath
+    $DockerArgs[1] = "-it"
+    $null | & docker $DockerArgs | python3 -u $FormatterPath
 } else {
     & docker $DockerArgs
 }
