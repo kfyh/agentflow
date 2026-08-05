@@ -113,6 +113,16 @@ class TestRunner(unittest.TestCase):
         )
         self.assertIn("(streaming real-time output)", result.stdout)
 
+    def test_gemini_verbose_flag_parsing(self):
+        """Verifies that the verbose flag and streaming format are correctly loaded for gemini engine."""
+        result = subprocess.run(
+            ["./run-agent.sh", "-c", "gemini", "-p", "test prompt", "--verbose"],
+            capture_output=True,
+            text=True,
+            env=self.test_env
+        )
+        self.assertIn("(streaming real-time output)", result.stdout)
+
     def test_tui_prompt_mode(self):
         """Verifies that running with --tui and a prompt prints Executing: claude [prompt...] and not Executing: claude -p."""
         result = subprocess.run(
