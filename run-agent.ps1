@@ -60,7 +60,7 @@ if ($ProjectPath) {
 # a shared/default branch. Only runs when the mount root is itself a git repo
 # root and the workspace is writable (coder role); parent-dir/context mounts and
 # read-only design/spec runs skip this check.
-if (($Role -ne "design") -and ($Role -ne "spec") -and (Get-Command git -ErrorAction SilentlyContinue)) {
+if (($env:AGENT_TESTING -ne "true") -and ($Role -ne "design") -and ($Role -ne "spec") -and (Get-Command git -ErrorAction SilentlyContinue)) {
     $IsRepoRoot = $false
     git -C $ResolvedPath rev-parse --is-inside-work-tree > $null 2>&1
     if ($LASTEXITCODE -eq 0) {

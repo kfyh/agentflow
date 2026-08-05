@@ -139,7 +139,8 @@ class TestRunner(unittest.TestCase):
         import tempfile
 
         # Create a temp directory to simulate $HOME
-        with tempfile.TemporaryDirectory() as temp_home:
+        temp_home = tempfile.mkdtemp()
+        try:
             vibe_dir = os.path.join(temp_home, ".vibe")
             os.makedirs(vibe_dir)
             env_file = os.path.join(vibe_dir, ".env")
@@ -171,6 +172,9 @@ class TestRunner(unittest.TestCase):
             )
             
             self.assertIn("Mode: API Key Authentication (MISTRAL_API_KEY detected)", result.stdout)
+        finally:
+            import shutil
+            shutil.rmtree(temp_home, ignore_errors=True)
 
 if __name__ == '__main__':
     unittest.main()
