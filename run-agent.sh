@@ -140,6 +140,29 @@ else
   echo "ℹ️  No project path specified. Defaulting to current directory: $HOST_PATH"
 fi
 
+# --- Branch Safety Check (single-repo, writable runs only) ---
+# Prevent an autonomous agent from editing the working tree while checked out on
+# a shared/default branch. Only runs when the mount root is itself a git repo
+# root and the workspace is writable (coder role); parent-dir/context mounts and
+# read-only design/spec runs skip this check.
+if [ "$ROLE" != "design" ] && [ "$ROLE" != "spec" ]; then
+  if git -C "$HOST_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 && \
+     [ "$(git -C "$HOST_PATH" rev-parse --show-toplevel 2>/dev/null)" = "$HOST_PATH" ]; then
+    CURRENT_BRANCH=$(git -C "$HOST_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
+    case "$CURRENT_BRANCH" in
+      main|master|develop|development|trunk|release)
+        echo "🛑 Refusing to launch: workspace is on default/shared branch '$CURRENT_BRANCH'."
+        echo "💡 Switch to a working branch first, e.g.:"
+        echo "   git -C \"$HOST_PATH\" switch -c my-work-branch"
+        exit 1
+        ;;
+    esac
+    echo "🌿 Branch check OK: workspace on '$CURRENT_BRANCH'."
+  else
+    echo "ℹ️  Workspace is not a single git repo root — skipping branch safety check."
+  fi
+fi
+
 # --- Authentication Mode Check ---
 IS_ENV_AUTH=false
 ENV_ARGS=()
@@ -243,6 +266,19 @@ if [ "$HAS_PROMPT" = true ]; then
   FIRST_LINE=$(echo "$RAW_PROMPT" | head -n 1)
   if [ -n "$FIRST_LINE" ] && [ ${#FIRST_LINE} -le 50 ]; then
     echo -ne "\033]0;${FIRST_LINE}\007"
+  fi
+fi
+
+# --- File Ownership Check ---
+if command -v id >/dev/null 2>&1; then
+  CURRENT_UID=$(id -u)
+  NON_OWNED_FILES=$(find "$HOST_PATH" -maxdepth 3 ! -user "$CURRENT_UID" -print -quit 2>/dev/null)
+  if [ -n "$NON_OWNED_FILES" ]; then
+    echo "⚠️  Warning: Found files/directories in your workspace not owned by your user (UID $CURRENT_UID):"
+    find "$HOST_PATH" -maxdepth 3 ! -user "$CURRENT_UID" 2>/dev/null | head -n 5
+    echo "💡 This can cause Podman/Docker to fail with permission or 'lsetxattr: operation not permitted' errors."
+    echo "👉 You may want to run: sudo chown -R \$(id -u):\$(id -g) \"$HOST_PATH\""
+    echo ""
   fi
 fi
 
