@@ -269,6 +269,19 @@ if [ "$HAS_PROMPT" = true ]; then
   fi
 fi
 
+# --- File Ownership Check ---
+if command -v id >/dev/null 2>&1; then
+  CURRENT_UID=$(id -u)
+  NON_OWNED_FILES=$(find "$HOST_PATH" -maxdepth 3 ! -user "$CURRENT_UID" -print -quit 2>/dev/null)
+  if [ -n "$NON_OWNED_FILES" ]; then
+    echo "⚠️  Warning: Found files/directories in your workspace not owned by your user (UID $CURRENT_UID):"
+    find "$HOST_PATH" -maxdepth 3 ! -user "$CURRENT_UID" 2>/dev/null | head -n 5
+    echo "💡 This can cause Podman/Docker to fail with permission or 'lsetxattr: operation not permitted' errors."
+    echo "👉 You may want to run: sudo chown -R \$(id -u):\$(id -g) \"$HOST_PATH\""
+    echo ""
+  fi
+fi
+
 # Check if Container Image exists locally, build if missing
 IMAGE_FULL_NAME="$IMAGE_NAME:$TAG"
 if [ -z "$($CONTAINER_ENGINE images -q "$IMAGE_FULL_NAME" 2>/dev/null)" ]; then
