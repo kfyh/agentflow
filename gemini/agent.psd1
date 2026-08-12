@@ -2,7 +2,18 @@
     ImageName          = "agentic-coder"
     Tag                = "latest"
     CliCommand         = "agy"
-    StreamFormatter    = "gemini/stream-formatter.py"
+    StreamFormatter    = "stream-formatter.py"
+
+    # --- Per-mode CLI argument contract ---
+    # ArgsCommon is prepended in every mode. The {{PROMPT}} token in a mode
+    # array is replaced with the final prompt text; a mode without the token
+    # never receives a prompt.
+    ArgsCommon         = @()
+    ArgsInteractive    = @()
+    ArgsTui            = @("{{PROMPT}}")
+    ArgsHeadless       = @("-p", "{{PROMPT}}")
+    ArgsStream         = @("-p", "{{PROMPT}}", "--output-format", "stream-json")
+
     EnvVars            = @("GEMINI_API_KEY")
     Volumes            = @(
         "agentic-coder-gemini:/home/node/.gemini",

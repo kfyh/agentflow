@@ -3,8 +3,18 @@
     Tag                = "latest"
     CliCommand         = "claude"
     VerboseFlag        = "--verbose"
-    CliArgs            = @("--permission-mode", "bypassPermissions")
-    StreamFormatter    = "claude\stream-formatter.py"
+    StreamFormatter    = "stream-formatter.py"
+
+    # --- Per-mode CLI argument contract ---
+    # ArgsCommon is prepended in every mode. The {{PROMPT}} token in a mode
+    # array is replaced with the final prompt text; a mode without the token
+    # never receives a prompt.
+    ArgsCommon         = @("--permission-mode", "bypassPermissions")
+    ArgsInteractive    = @()
+    ArgsTui            = @("{{PROMPT}}")
+    ArgsHeadless       = @("-p", "{{PROMPT}}")
+    ArgsStream         = @("-p", "{{PROMPT}}", "--output-format", "stream-json", "--verbose")
+
     EnvVars            = @("ANTHROPIC_API_KEY")
     Volumes            = @(
         "agentic-coder-claude:/home/node/.claude"

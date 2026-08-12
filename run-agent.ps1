@@ -25,11 +25,15 @@ param (
 # Locate Script Directory
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Load Pluggable Engine Driver Config
-$ConfFile = Join-Path $ScriptDir "config\${Container}.psd1"
+# Load Pluggable Engine Driver Config (lives alongside the engine's Dockerfile)
+$EngineDir = Join-Path $ScriptDir $Container
+$ConfFile = Join-Path $EngineDir "agent.psd1"
 if (-not (Test-Path -Path $ConfFile -PathType Leaf)) {
     Write-Error "Engine '${Container}' is not a valid driver config (file not found: $ConfFile)."
-    Write-Host "💡 Available engines: gemini, mistral, claude"
+    $AvailableEngines = Get-ChildItem -Path $ScriptDir -Directory |
+        Where-Object { Test-Path -Path (Join-Path $_.FullName "agent.psd1") -PathType Leaf } |
+        ForEach-Object { $_.Name }
+    Write-Host "💡 Available engines: $($AvailableEngines -join ', ')"
     exit 1
 }
 
@@ -180,11 +184,11 @@ if ($HasPrompt) {
     }
 }
 
-# --- Load Local Env File if present (e.g. for Mistral) ---
-if ($Container -eq "mistral") {
-    $VibeEnvPath = Join-Path $HOME ".vibe\.env"
-    if (Test-Path -Path $VibeEnvPath -PathType Leaf) {
-        Get-Content $VibeEnvPath | ForEach-Object {
+# --- Load Local Env File if the engine driver declares one (e.g. Mistral's ~/.vibe/.env) ---
+if ($Config.EnvFile) {
+    $EnvFilePath = $Config.EnvFile -replace '^~', $HOME
+    if (Test-Path -Path $EnvFilePath -PathType Leaf) {
+        Get-Content $EnvFilePath | ForEach-Object {
             $line = $_.Trim()
             if ($line -and -not $line.StartsWith("#")) {
                 if ($line -match "^([^=]+)=(.*)$") {
@@ -228,7 +232,7 @@ $ImageFullName = "$($Config.ImageName):$($Config.Tag)"
 $ImageId = docker images -q $ImageFullName 2>$null
 if (-not $ImageId) {
     Write-Host "⚠️  Docker image '$ImageFullName' not found locally." -ForegroundColor Yellow
-    $DockerfilePath = Join-Path $ScriptDir $Container
+    $DockerfilePath = $EngineDir
     if (Test-Path -Path $DockerfilePath -PathType Container) {
         Write-Host "🔨 Building Docker image '$ImageFullName' from $DockerfilePath..." -ForegroundColor Cyan
         & docker build -t $ImageFullName $DockerfilePath
@@ -252,64 +256,74 @@ if ($HasPrompt -and -not $Tui) {
 }
 Write-Host "--------------------------------------------------------"
 
+# --- Assemble CLI arguments from the engine driver's per-mode contract ---
+# The driver declares one array per invocation mode; the runner picks the mode
+# and knows nothing about any vendor's flag grammar.
+$Streaming = $false
+$ModeArgs = @()
+$ExecLabel = ""
+if ($HasPrompt) {
+    if ($Tui) {
+        $ModeArgs = $Config.ArgsTui
+        $ExecLabel = "$($Config.CliCommand) [prompt + guidelines]"
+    } elseif ($Config.StreamFormatter) {
+        $ModeArgs = $Config.ArgsStream
+        $Streaming = $true
+        $ExecLabel = "$($Config.CliCommand) -p [prompt + guidelines] (streaming real-time output)"
+    } else {
+        $ModeArgs = $Config.ArgsHeadless
+        $ExecLabel = "$($Config.CliCommand) -p [prompt + guidelines]"
+    }
+} else {
+    $ModeArgs = $Config.ArgsInteractive
+}
+
+# Substitute the driver's {{PROMPT}} token (a standalone argument, never a substring)
+$DeclaredArgs = @()
+if ($Config.ArgsCommon) { $DeclaredArgs += $Config.ArgsCommon }
+if ($ModeArgs) { $DeclaredArgs += $ModeArgs }
+$CmdArgs = @()
+foreach ($arg in $DeclaredArgs) {
+    if ($arg -eq "{{PROMPT}}") {
+        $CmdArgs += $FinalPrompt
+    } else {
+        $CmdArgs += $arg
+    }
+}
+
+# Honour -v only when the driver names a verbose flag the mode has not already declared
+if ($VerboseMode -and $Config.VerboseFlag -and ($CmdArgs -notcontains $Config.VerboseFlag)) {
+    $CmdArgs += $Config.VerboseFlag
+    $ExecLabel = "$ExecLabel (with $($Config.VerboseFlag))"
+}
+
+# --- Container stdin / TTY flags ---
+# Docker refuses to attach stdin to a TTY-enabled container unless stdin really
+# is a terminal, so -t is only requested when stdin and stdout both are. The
+# streamed path pipes stdout into the formatter and takes stdin from $null, so
+# it never asks for a TTY.
+$StdinArgs = @("-i")
+if ((-not $Streaming) -and (-not [Console]::IsInputRedirected) -and (-not [Console]::IsOutputRedirected)) {
+    $StdinArgs += "-t"
+}
+
 # Assemble docker execution arguments
-$DockerArgs = @("run", "-it", "--rm", "-v", "${ResolvedPath}:/workspace:${WorkspaceMountFlag}")
+$DockerArgs = @("run") + $StdinArgs + @("--rm", "-v", "${ResolvedPath}:/workspace:${WorkspaceMountFlag}")
 if ($EnvArgs) { $DockerArgs += $EnvArgs }
 if ($VolumeArgs) { $DockerArgs += $VolumeArgs }
 $DockerArgs += @("$($Config.ImageName):$($Config.Tag)")
-
-# Assemble engine CLI arguments
-$CmdArgs = @()
-if ($Config.CliArgs) {
-    $CmdArgs += $Config.CliArgs
-}
-if ($HasPrompt) {
-    if ($Tui) {
-        $CmdArgs += $FinalPrompt
-    } else {
-        if ($Config.StreamFormatter) {
-            $CmdArgs += @("-p", $FinalPrompt, "--output-format", "stream-json")
-            if ($Config.VerboseFlag) {
-                $CmdArgs += $Config.VerboseFlag
-            }
-        } else {
-            $CmdArgs += @("-p", $FinalPrompt)
-        }
-    }
-}
-if ($VerboseMode -and $Config.VerboseFlag) {
-    $CmdArgs += $Config.VerboseFlag
-}
+$DockerArgs += @($Config.CliCommand)
+$DockerArgs += $CmdArgs
 
 if ($HasPrompt) {
-    if ($Tui) {
-        if ($VerboseMode -and $Config.VerboseFlag) {
-            Write-Host "🤖 Executing: $($Config.CliCommand) [prompt + guidelines] (with $($Config.VerboseFlag))"
-        } else {
-            Write-Host "🤖 Executing: $($Config.CliCommand) [prompt + guidelines]"
-        }
-    } else {
-        if ($Config.StreamFormatter) {
-            Write-Host "🤖 Executing: $($Config.CliCommand) -p [prompt + guidelines] (streaming real-time output)"
-        } else {
-            if ($VerboseMode -and $Config.VerboseFlag) {
-                Write-Host "🤖 Executing: $($Config.CliCommand) -p [prompt + guidelines] (with $($Config.VerboseFlag))"
-            } else {
-                Write-Host "🤖 Executing: $($Config.CliCommand) -p [prompt + guidelines]"
-            }
-        }
-    }
+    Write-Host "🤖 Executing: $ExecLabel"
 } else {
     Write-Host "🤖 Launching interactive CLI TUI..."
 }
 
-$DockerArgs += @($Config.CliCommand)
-$DockerArgs += $CmdArgs
-
 # Run docker
-if ($HasPrompt -and -not $Tui -and $Config.StreamFormatter) {
-    $FormatterPath = Join-Path $ScriptDir $Config.StreamFormatter
-    $DockerArgs[1] = "-it"
+if ($Streaming) {
+    $FormatterPath = Join-Path $EngineDir $Config.StreamFormatter
     $null | & docker $DockerArgs | python3 -u $FormatterPath
 } else {
     & docker $DockerArgs

@@ -16,7 +16,7 @@ This project is fully compatible with native Docker engines, WSL2 environments, 
 
 ## Workspace Structure
 
-The project is structured with pluggable configs and a centralized runner at the root:
+The project is structured with a centralized runner at the root and one self-contained folder per vendor. Each vendor folder holds everything specific to that engine: its Docker build, its driver config for both runners, and its stream formatter. Adding a vendor means adding a folder — the runners discover engines by looking for `agent.conf` / `agent.psd1`.
 
 ```text
 /Users/localkevin/workspace/Agentic Docker Image/
@@ -25,20 +25,35 @@ The project is structured with pluggable configs and a centralized runner at the
 ├── guidelines.txt               # Global safety guidelines (appended to all prompts)
 ├── prompt.txt / prompt.md       # Shared prompt file (either is supported)
 ├── README.md                    # This instructions file
-├── config/                      # Pluggable driver configurations
-│   ├── gemini.conf              # Gemini driver config (Bash)
-│   ├── gemini.psd1              # Gemini driver config (PowerShell)
-│   ├── mistral.conf             # Mistral driver config (Bash)
-│   ├── mistral.psd1             # Mistral driver config (PowerShell)
-│   ├── claude.conf              # Claude driver config (Bash)
-│   └── claude.psd1              # Claude driver config (PowerShell)
 ├── gemini/
-│   └── Dockerfile               # Gemini (Antigravity CLI) Docker build
+│   ├── Dockerfile               # Gemini (Antigravity CLI) Docker build
+│   ├── agent.conf               # Gemini driver config (Bash)
+│   ├── agent.psd1               # Gemini driver config (PowerShell)
+│   └── stream-formatter.py      # Gemini stream-json renderer
 ├── mistral/
-│   └── Dockerfile               # Mistral (Vibe CLI) Docker build
+│   ├── Dockerfile               # Mistral (Vibe CLI) Docker build
+│   ├── agent.conf               # Mistral driver config (Bash)
+│   └── agent.psd1               # Mistral driver config (PowerShell)
 └── claude/
-    └── Dockerfile               # Claude (Claude Code CLI) Docker build
+    ├── Dockerfile               # Claude (Claude Code CLI) Docker build
+    ├── agent.conf               # Claude driver config (Bash)
+    ├── agent.psd1               # Claude driver config (PowerShell)
+    └── stream-formatter.py      # Claude stream-json renderer
 ```
+
+### Driver argument contract
+
+A driver declares the CLI arguments for each invocation mode, so the runner holds no vendor-specific flag grammar:
+
+| Key | Used when |
+| --- | --- |
+| `ARGS_COMMON` / `ArgsCommon` | Prepended in every mode |
+| `ARGS_INTERACTIVE` / `ArgsInteractive` | No prompt — interactive TUI |
+| `ARGS_TUI` / `ArgsTui` | Prompt delivered to the TUI (`-t`) |
+| `ARGS_HEADLESS` / `ArgsHeadless` | Prompt, no stream formatter declared |
+| `ARGS_STREAM` / `ArgsStream` | Prompt, output piped through `STREAM_FORMATTER` |
+
+The standalone token `{{PROMPT}}` in any mode array is replaced with the final prompt text (prompt plus guidelines). A mode array without the token never receives a prompt. `ENV_FILE` / `EnvFile` optionally names a host env file to load before the auth check (a leading `~` is expanded in the PowerShell driver).
 
 ---
 
@@ -93,7 +108,7 @@ run-agent.sh [options] [workspace_path] [prompt_arguments]
 ```
 
 ### Options:
-* `-c | --container | --engine <name>`: The engine driver to load from `config/` (`gemini`, `claude`, `mistral`). Defaults to `gemini`.
+* `-c | --container | --engine <name>`: The engine driver to load from the matching vendor folder (`gemini`, `claude`, `mistral`). Defaults to `gemini`.
 * `-r | --role | --mode <role>`: The execution role (`coder`, `design`, `spec`). Defaults to `coder`.
 * `-p | --prompt <string>`: Directly passes the prompt.
 

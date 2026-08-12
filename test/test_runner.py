@@ -30,7 +30,9 @@ class TestRunner(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("is not a valid driver config", result.stdout)
-        self.assertIn("Available engines: gemini, mistral, claude", result.stdout)
+        # Engines are discovered from the vendor folders holding an agent.conf
+        for engine in ["claude", "gemini", "mistral"]:
+            self.assertIn(engine, result.stdout.split("Available engines:")[1])
 
     def test_run_without_credentials(self):
         """Verifies runner behavior when executing without API credentials.
