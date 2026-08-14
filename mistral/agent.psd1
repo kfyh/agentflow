@@ -13,6 +13,12 @@
     ArgsTui            = @("{{PROMPT}}")
     ArgsHeadless       = @("-p", "{{PROMPT}}")
 
+    # --- Per-mode container stdin/TTY contract ---
+    # No StreamFormatter is declared, so StdinStream is never consulted.
+    StdinInteractive   = @("-i", "-t")
+    StdinTui           = @("-i", "-t")
+    StdinHeadless      = @("-i")
+
     # Loaded before the auth check so keys defined here count as API-key auth.
     # A leading ~ is expanded to the user's home directory.
     EnvFile            = "~/.vibe/.env"

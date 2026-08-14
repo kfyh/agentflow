@@ -66,6 +66,10 @@ ARGS_INTERACTIVE=()
 ARGS_TUI=()
 ARGS_HEADLESS=()
 ARGS_STREAM=()
+STDIN_INTERACTIVE=()
+STDIN_TUI=()
+STDIN_HEADLESS=()
+STDIN_STREAM=()
 ENGINE_DIR="$SCRIPT_DIR/$ENGINE"
 CONF_FILE="$ENGINE_DIR/agent.conf"
 if [ ! -f "$CONF_FILE" ]; then
@@ -323,21 +327,32 @@ echo "--------------------------------------------------------"
 # and knows nothing about any vendor's flag grammar.
 STREAMING=false
 MODE_ARGS=()
+STDIN_ARGS=()
 EXEC_LABEL=""
 if [ "$HAS_PROMPT" = true ]; then
   if [ "$TUI" = true ]; then
     MODE_ARGS=("${ARGS_TUI[@]}")
+    STDIN_ARGS=("${STDIN_TUI[@]}")
     EXEC_LABEL="$CLI_COMMAND [prompt + guidelines]"
   elif [ -n "$STREAM_FORMATTER" ]; then
     MODE_ARGS=("${ARGS_STREAM[@]}")
+    STDIN_ARGS=("${STDIN_STREAM[@]}")
     STREAMING=true
     EXEC_LABEL="$CLI_COMMAND -p [prompt + guidelines] (streaming real-time output)"
   else
     MODE_ARGS=("${ARGS_HEADLESS[@]}")
+    STDIN_ARGS=("${STDIN_HEADLESS[@]}")
     EXEC_LABEL="$CLI_COMMAND -p [prompt + guidelines]"
   fi
 else
   MODE_ARGS=("${ARGS_INTERACTIVE[@]}")
+  STDIN_ARGS=("${STDIN_INTERACTIVE[@]}")
+fi
+
+# A driver that declares no stdin flags for the selected mode still needs stdin
+# attached, so fall back to -i alone rather than to nothing.
+if [ ${#STDIN_ARGS[@]} -eq 0 ]; then
+  STDIN_ARGS=("-i")
 fi
 
 # Substitute the driver's {{PROMPT}} token (a standalone argument, never a substring)
@@ -361,16 +376,6 @@ if [ "$VERBOSE" = true ] && [ -n "$VERBOSE_FLAG" ]; then
   esac
 fi
 
-# --- Container stdin / TTY Flags ---
-# Docker refuses to attach stdin to a TTY-enabled container unless stdin really
-# is a terminal, so -t is only requested when stdin and stdout both are. The
-# streamed path pipes stdout into the formatter and takes stdin from /dev/null,
-# so it never asks for a TTY.
-STDIN_ARGS=("-i")
-if [ "$STREAMING" != true ] && [ -t 0 ] && [ -t 1 ]; then
-  STDIN_ARGS+=("-t")
-fi
-
 DOCKER_ARGS=(
   "${STDIN_ARGS[@]}" --rm
   "${CONTAINER_RUN_ARGS[@]}"
@@ -385,6 +390,13 @@ if [ "$HAS_PROMPT" = true ]; then
   echo "🤖 Executing: $EXEC_LABEL"
 else
   echo "🤖 Launching interactive CLI TUI..."
+fi
+
+# The assembled invocation is otherwise invisible to the test suite, which is
+# why the stdin/TTY and volume-path regressions went unnoticed.
+if [ "$AGENT_TESTING" = "true" ]; then
+  echo "🧪 Container flags: ${STDIN_ARGS[*]}"
+  echo "🧪 Volumes: ${VOLUMES[*]}"
 fi
 
 if [ "$STREAMING" = true ]; then

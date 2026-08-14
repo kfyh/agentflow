@@ -261,21 +261,32 @@ Write-Host "--------------------------------------------------------"
 # and knows nothing about any vendor's flag grammar.
 $Streaming = $false
 $ModeArgs = @()
+$StdinArgs = @()
 $ExecLabel = ""
 if ($HasPrompt) {
     if ($Tui) {
         $ModeArgs = $Config.ArgsTui
+        $StdinArgs = $Config.StdinTui
         $ExecLabel = "$($Config.CliCommand) [prompt + guidelines]"
     } elseif ($Config.StreamFormatter) {
         $ModeArgs = $Config.ArgsStream
+        $StdinArgs = $Config.StdinStream
         $Streaming = $true
         $ExecLabel = "$($Config.CliCommand) -p [prompt + guidelines] (streaming real-time output)"
     } else {
         $ModeArgs = $Config.ArgsHeadless
+        $StdinArgs = $Config.StdinHeadless
         $ExecLabel = "$($Config.CliCommand) -p [prompt + guidelines]"
     }
 } else {
     $ModeArgs = $Config.ArgsInteractive
+    $StdinArgs = $Config.StdinInteractive
+}
+
+# A driver that declares no stdin flags for the selected mode still needs stdin
+# attached, so fall back to -i alone rather than to nothing.
+if (-not $StdinArgs -or $StdinArgs.Count -eq 0) {
+    $StdinArgs = @("-i")
 }
 
 # Substitute the driver's {{PROMPT}} token (a standalone argument, never a substring)
@@ -297,16 +308,6 @@ if ($VerboseMode -and $Config.VerboseFlag -and ($CmdArgs -notcontains $Config.Ve
     $ExecLabel = "$ExecLabel (with $($Config.VerboseFlag))"
 }
 
-# --- Container stdin / TTY flags ---
-# Docker refuses to attach stdin to a TTY-enabled container unless stdin really
-# is a terminal, so -t is only requested when stdin and stdout both are. The
-# streamed path pipes stdout into the formatter and takes stdin from $null, so
-# it never asks for a TTY.
-$StdinArgs = @("-i")
-if ((-not $Streaming) -and (-not [Console]::IsInputRedirected) -and (-not [Console]::IsOutputRedirected)) {
-    $StdinArgs += "-t"
-}
-
 # Assemble docker execution arguments
 $DockerArgs = @("run") + $StdinArgs + @("--rm", "-v", "${ResolvedPath}:/workspace:${WorkspaceMountFlag}")
 if ($EnvArgs) { $DockerArgs += $EnvArgs }
@@ -319,6 +320,13 @@ if ($HasPrompt) {
     Write-Host "🤖 Executing: $ExecLabel"
 } else {
     Write-Host "🤖 Launching interactive CLI TUI..."
+}
+
+# The assembled invocation is otherwise invisible to the test suite, which is
+# why the stdin/TTY and volume-path regressions went unnoticed.
+if ($env:AGENT_TESTING -eq "true") {
+    Write-Host "🧪 Container flags: $($StdinArgs -join ' ')"
+    Write-Host "🧪 Volumes: $($Config.Volumes -join ' ')"
 }
 
 # Run docker

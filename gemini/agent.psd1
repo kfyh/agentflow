@@ -14,6 +14,14 @@
     ArgsHeadless       = @("-p", "{{PROMPT}}")
     ArgsStream         = @("-p", "{{PROMPT}}", "--output-format", "stream-json")
 
+    # --- Per-mode container stdin/TTY contract ---
+    # Interactive modes need a PTY; the streamed mode pipes stdout into the
+    # formatter and reads stdin from $null, so it must not ask for one.
+    StdinInteractive   = @("-i", "-t")
+    StdinTui           = @("-i", "-t")
+    StdinHeadless      = @("-i")
+    StdinStream        = @("-i")
+
     EnvVars            = @("GEMINI_API_KEY")
     Volumes            = @(
         "agentic-coder-gemini:/home/node/.gemini",
