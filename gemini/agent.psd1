@@ -2,6 +2,7 @@
     ImageName          = "agentic-coder"
     Tag                = "latest"
     CliCommand         = "agy"
+    VerboseFlag        = "--verbose"
     StreamFormatter    = "stream-formatter.py"
 
     # --- Per-mode CLI argument contract ---

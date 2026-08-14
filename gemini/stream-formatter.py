@@ -157,7 +157,7 @@ def main():
                 step_type = u.get("step_type")
                 state = u.get("state")
                 text_delta = u.get("text_delta", "")
-                thinking_delta = u.get("thinking_delta", u.get("thinking", u.get("thought", u.get("thought_delta", ""))))
+                thinking_delta = u.get("thinking_delta") or u.get("thinking") or u.get("thought") or u.get("thought_delta") or ""
 
                 # Check if this delta is reasoning/thinking
                 is_thinking_delta = (step_type in ("thought", "thinking", "reasoning")) or bool(thinking_delta)
