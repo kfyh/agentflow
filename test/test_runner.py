@@ -30,7 +30,9 @@ class TestRunner(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("is not a valid driver config", result.stdout)
-        self.assertIn("Available engines: gemini, mistral, claude", result.stdout)
+        # Engines are discovered from the vendor folders holding an agent.conf
+        for engine in ["claude", "gemini", "mistral"]:
+            self.assertIn(engine, result.stdout.split("Available engines:")[1])
 
     def test_run_without_credentials(self):
         """Verifies runner behavior when executing without API credentials.
@@ -133,6 +135,119 @@ class TestRunner(unittest.TestCase):
         )
         self.assertIn("Executing: claude [prompt + guidelines]", result.stdout)
         self.assertNotIn("claude -p", result.stdout)
+
+    def _run(self, *args):
+        """Runs the bash runner with testing env and returns stdout."""
+        return subprocess.run(
+            ["./run-agent.sh", *args],
+            capture_output=True,
+            text=True,
+            env=self.test_env
+        ).stdout
+
+    def _container_flags(self, stdout):
+        """Extracts the stdin/TTY flags the runner assembled for the container."""
+        for line in stdout.splitlines():
+            if "Container flags:" in line:
+                return line.split("Container flags:")[1].strip()
+        self.fail(f"Runner did not report container flags:\n{stdout}")
+
+    def test_interactive_mode_requests_a_tty(self):
+        """No prompt means the bare interactive TUI, which cannot run without a PTY.
+
+        The CLIs switch themselves to non-interactive print mode when stdin is
+        not a terminal, so a missing -t here breaks the sandbox-then-work-by-hand
+        flow rather than merely degrading it.
+        """
+        output = self._run("-c", "claude", ".")
+        self.assertIn("Launching interactive CLI TUI", output)
+        self.assertEqual("-i -t", self._container_flags(output))
+
+    def test_tui_prompt_mode_requests_a_tty(self):
+        """A prompt delivered to the TUI still lands in an interactive session."""
+        output = self._run("-c", "claude", "-p", "test prompt", "--tui")
+        self.assertEqual("-i -t", self._container_flags(output))
+
+    def test_streamed_mode_does_not_request_a_tty(self):
+        """The streamed path pipes stdout and reads stdin from /dev/null.
+
+        Docker refuses to allocate a TTY for a container whose stdin is not a
+        terminal, so requesting one here would fail the run outright.
+        """
+        output = self._run("-c", "claude", "-p", "test prompt")
+        self.assertIn("streaming real-time output", output)
+        self.assertEqual("-i", self._container_flags(output))
+
+    def test_headless_mode_does_not_request_a_tty(self):
+        """Mistral declares no stream formatter, so a prompt uses headless mode."""
+        output = self._run("-c", "mistral", "-p", "test prompt")
+        self.assertEqual("-i", self._container_flags(output))
+
+    def test_tui_flag_without_a_prompt_stays_interactive(self):
+        """-t selects how a prompt is delivered; alone it is a no-op.
+
+        Documents the behaviour rather than endorsing it: without a prompt there
+        is nothing to route, so the run is identical to omitting the flag.
+        """
+        with_flag = self._run("-c", "claude", ".", "-t")
+        without_flag = self._run("-c", "claude", ".")
+        self.assertIn("Launching interactive CLI TUI", with_flag)
+        self.assertEqual(
+            self._container_flags(without_flag), self._container_flags(with_flag)
+        )
+
+    def test_no_volume_shadows_the_cli_install_path(self):
+        """Deleting an image must be a complete reset of container code.
+
+        The vendor CLIs install under ~/.local/bin, so a volume mounted at
+        /home/node itself would shadow the binary and pin it in state that
+        survives `docker rmi` — a rebuilt image would silently keep running the
+        old CLI. Volumes carry credentials and config; the image carries code.
+        Mount subdirectories of the home directory, never the home directory.
+        """
+        import glob
+        for driver in sorted(glob.glob("*/agent.conf") + glob.glob("*/agent.psd1")):
+            engine = os.path.basename(os.path.dirname(driver))
+            with open(driver) as f:
+                body = f.read()
+            with self.subTest(driver=f"{engine}/{os.path.basename(driver)}"):
+                # A subdirectory mount reads ":/home/node/<something>"; only an
+                # exact home-directory mount ends the quoted target there.
+                msg = (
+                    f"{driver} mounts a volume at /home/node itself, which "
+                    f"shadows the CLI installed under ~/.local/bin. Mount a "
+                    f"subdirectory such as /home/node/.{engine} instead."
+                )
+                self.assertNotIn(':/home/node"', body, msg)
+                self.assertNotIn(":/home/node'", body, msg)
+
+    def test_claude_persists_its_credentials_directory(self):
+        """Credentials live in ~/.claude/.credentials.json and must outlive --rm.
+
+        Without this the OAuth flow would have to be repeated on every prompted
+        run, not just interactive ones.
+        """
+        output = self._run("-c", "claude", ".")
+        self.assertIn("agentic-coder-claude:/home/node/.claude", output)
+
+    def test_every_engine_declares_stdin_flags_for_each_mode(self):
+        """A driver that omits its stdin contract silently loses the TTY.
+
+        The runner falls back to -i alone, which is correct for headless work and
+        wrong for anything interactive, so the omission surfaces as a broken TUI
+        rather than a config error.
+        """
+        import glob
+        for conf in sorted(glob.glob("*/agent.conf")):
+            engine = os.path.basename(os.path.dirname(conf))
+            with open(conf) as f:
+                body = f.read()
+            with self.subTest(engine=engine):
+                for mode in ["STDIN_INTERACTIVE", "STDIN_TUI", "STDIN_HEADLESS"]:
+                    self.assertIn(f"{mode}=", body)
+                # Only a driver with a stream formatter ever uses STDIN_STREAM.
+                if "STREAM_FORMATTER=" in body:
+                    self.assertIn("STDIN_STREAM=", body)
 
     def test_mistral_env_file_loading(self):
         """Verifies that ~/.vibe/.env is loaded and exports MISTRAL_API_KEY."""

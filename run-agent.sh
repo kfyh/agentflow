@@ -57,14 +57,29 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# Load Pluggable Engine Driver Config
+# Load Pluggable Engine Driver Config (lives alongside the engine's Dockerfile)
 VERBOSE_FLAG=""
 STREAM_FORMATTER=""
-CLI_ARGS=()
-CONF_FILE="$SCRIPT_DIR/config/$ENGINE.conf"
+ENV_FILE=""
+ARGS_COMMON=()
+ARGS_INTERACTIVE=()
+ARGS_TUI=()
+ARGS_HEADLESS=()
+ARGS_STREAM=()
+STDIN_INTERACTIVE=()
+STDIN_TUI=()
+STDIN_HEADLESS=()
+STDIN_STREAM=()
+ENGINE_DIR="$SCRIPT_DIR/$ENGINE"
+CONF_FILE="$ENGINE_DIR/agent.conf"
 if [ ! -f "$CONF_FILE" ]; then
   echo "❌ Error: Engine '$ENGINE' is not a valid driver config (file not found: $CONF_FILE)."
-  echo "💡 Available engines: gemini, mistral, claude"
+  ENGINE_LIST=""
+  for driver in "$SCRIPT_DIR"/*/agent.conf; do
+    [ -f "$driver" ] || continue
+    ENGINE_LIST="${ENGINE_LIST:+$ENGINE_LIST, }$(basename "$(dirname "$driver")")"
+  done
+  echo "💡 Available engines: $ENGINE_LIST"
   exit 1
 fi
 
@@ -80,29 +95,26 @@ if command -v podman >/dev/null 2>&1; then
   fi
 fi
 
-# --- Load Local Env File if present (e.g. for Mistral) ---
-if [ "$ENGINE" = "mistral" ]; then
-  VIBE_ENV="$HOME/.vibe/.env"
-  if [ -f "$VIBE_ENV" ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      # Skip comments and empty lines
-      [[ "$line" =~ ^[[:space:]]*# ]] && continue
-      [[ -z "$line" ]] && continue
-      # Parse key=value
-      if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
-        key="${BASH_REMATCH[1]}"
-        val="${BASH_REMATCH[2]}"
-        # Strip outer quotes if any
-        val="${val#\"}"
-        val="${val%\"}"
-        val="${val#\'}"
-        val="${val%\'}"
-        if [ -z "${!key}" ]; then
-          export "$key"="$val"
-        fi
+# --- Load Local Env File if the engine driver declares one (e.g. Mistral's ~/.vibe/.env) ---
+if [ -n "$ENV_FILE" ] && [ -f "$ENV_FILE" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    # Skip comments and empty lines
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "$line" ]] && continue
+    # Parse key=value
+    if [[ "$line" =~ ^([^=]+)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      val="${BASH_REMATCH[2]}"
+      # Strip outer quotes if any
+      val="${val#\"}"
+      val="${val%\"}"
+      val="${val#\'}"
+      val="${val%\'}"
+      if [ -z "${!key}" ]; then
+        export "$key"="$val"
       fi
-    done < "$VIBE_ENV"
-  fi
+    fi
+  done < "$ENV_FILE"
 fi
 
 if [ "$CONTAINER_ENGINE" = "podman" ]; then
@@ -286,7 +298,7 @@ fi
 IMAGE_FULL_NAME="$IMAGE_NAME:$TAG"
 if [ -z "$($CONTAINER_ENGINE images -q "$IMAGE_FULL_NAME" 2>/dev/null)" ]; then
   echo "⚠️  Container image '$IMAGE_FULL_NAME' not found locally."
-  DOCKERFILE_PATH="$SCRIPT_DIR/$ENGINE"
+  DOCKERFILE_PATH="$ENGINE_DIR"
   if [ -d "$DOCKERFILE_PATH" ]; then
     echo "🔨 Building Container image '$IMAGE_FULL_NAME' from $DOCKERFILE_PATH..."
     $CONTAINER_ENGINE build -t "$IMAGE_FULL_NAME" "$DOCKERFILE_PATH"
@@ -310,71 +322,92 @@ else
 fi
 echo "--------------------------------------------------------"
 
-# Run the docker container
-CMD_ARGS=("${CLI_ARGS[@]}")
+# --- Assemble CLI Arguments from the Engine Driver's Per-Mode Contract ---
+# The driver declares one array per invocation mode; the runner picks the mode
+# and knows nothing about any vendor's flag grammar.
+STREAMING=false
+MODE_ARGS=()
+STDIN_ARGS=()
+EXEC_LABEL=""
 if [ "$HAS_PROMPT" = true ]; then
   if [ "$TUI" = true ]; then
-    CMD_ARGS+=("$FINAL_PROMPT")
+    MODE_ARGS=("${ARGS_TUI[@]}")
+    STDIN_ARGS=("${STDIN_TUI[@]}")
+    EXEC_LABEL="$CLI_COMMAND [prompt + guidelines]"
+  elif [ -n "$STREAM_FORMATTER" ]; then
+    MODE_ARGS=("${ARGS_STREAM[@]}")
+    STDIN_ARGS=("${STDIN_STREAM[@]}")
+    STREAMING=true
+    EXEC_LABEL="$CLI_COMMAND -p [prompt + guidelines] (streaming real-time output)"
   else
-    if [ -n "$STREAM_FORMATTER" ]; then
-      CMD_ARGS+=("-p" "$FINAL_PROMPT" "--output-format" "stream-json")
-      if [ -n "$VERBOSE_FLAG" ]; then
-        CMD_ARGS+=("$VERBOSE_FLAG")
-      fi
-    else
-      CMD_ARGS+=("-p" "$FINAL_PROMPT")
-    fi
-  fi
-fi
-if [ "$VERBOSE" = true ] && [ -n "$VERBOSE_FLAG" ]; then
-  CMD_ARGS+=("$VERBOSE_FLAG")
-fi
-
-if [ "$HAS_PROMPT" = true ]; then
-  if [ "$TUI" = true ]; then
-    echo "🤖 Executing: $CLI_COMMAND [prompt + guidelines] ${VERBOSE_FLAG:+(with $VERBOSE_FLAG)}"
-    "${RUN_CMD[@]}" -it --rm \
-      "${CONTAINER_RUN_ARGS[@]}" \
-      -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
-      "${ENV_ARGS[@]}" \
-      "${VOLUMES[@]}" \
-      "$IMAGE_NAME:$TAG" \
-      "$CLI_COMMAND" "${CMD_ARGS[@]}"
-  else
-    if [ -n "$STREAM_FORMATTER" ]; then
-      echo "🤖 Executing: $CLI_COMMAND -p [prompt + guidelines] (streaming real-time output)"
-      set -o pipefail
-      STDBUF_PREFIX=""
-      if command -v stdbuf >/dev/null 2>&1; then
-        STDBUF_PREFIX="stdbuf -oL"
-      fi
-      $STDBUF_PREFIX "${RUN_CMD[@]}" -it --rm \
-        "${CONTAINER_RUN_ARGS[@]}" \
-        -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
-        "${ENV_ARGS[@]}" \
-        "${VOLUMES[@]}" \
-        "$IMAGE_NAME:$TAG" \
-        "$CLI_COMMAND" "${CMD_ARGS[@]}" < /dev/null | python3 -u "$SCRIPT_DIR/$STREAM_FORMATTER"
-    else
-      echo "🤖 Executing: $CLI_COMMAND -p [prompt + guidelines] ${VERBOSE_FLAG:+(with $VERBOSE_FLAG)}"
-      "${RUN_CMD[@]}" -it --rm \
-        "${CONTAINER_RUN_ARGS[@]}" \
-        -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
-        "${ENV_ARGS[@]}" \
-        "${VOLUMES[@]}" \
-        "$IMAGE_NAME:$TAG" \
-        "$CLI_COMMAND" "${CMD_ARGS[@]}"
-    fi
+    MODE_ARGS=("${ARGS_HEADLESS[@]}")
+    STDIN_ARGS=("${STDIN_HEADLESS[@]}")
+    EXEC_LABEL="$CLI_COMMAND -p [prompt + guidelines]"
   fi
 else
+  MODE_ARGS=("${ARGS_INTERACTIVE[@]}")
+  STDIN_ARGS=("${STDIN_INTERACTIVE[@]}")
+fi
+
+# A driver that declares no stdin flags for the selected mode still needs stdin
+# attached, so fall back to -i alone rather than to nothing.
+if [ ${#STDIN_ARGS[@]} -eq 0 ]; then
+  STDIN_ARGS=("-i")
+fi
+
+# Substitute the driver's {{PROMPT}} token (a standalone argument, never a substring)
+CMD_ARGS=()
+for arg in "${ARGS_COMMON[@]}" "${MODE_ARGS[@]}"; do
+  if [ "$arg" = "{{PROMPT}}" ]; then
+    CMD_ARGS+=("$FINAL_PROMPT")
+  else
+    CMD_ARGS+=("$arg")
+  fi
+done
+
+# Honour -v only when the driver names a verbose flag the mode has not already declared
+if [ "$VERBOSE" = true ] && [ -n "$VERBOSE_FLAG" ]; then
+  case " ${CMD_ARGS[*]} " in
+    *" $VERBOSE_FLAG "*) ;;
+    *)
+      CMD_ARGS+=("$VERBOSE_FLAG")
+      EXEC_LABEL="$EXEC_LABEL (with $VERBOSE_FLAG)"
+      ;;
+  esac
+fi
+
+DOCKER_ARGS=(
+  "${STDIN_ARGS[@]}" --rm
+  "${CONTAINER_RUN_ARGS[@]}"
+  -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG"
+  "${ENV_ARGS[@]}"
+  "${VOLUMES[@]}"
+  "$IMAGE_NAME:$TAG"
+  "$CLI_COMMAND" "${CMD_ARGS[@]}"
+)
+
+if [ "$HAS_PROMPT" = true ]; then
+  echo "🤖 Executing: $EXEC_LABEL"
+else
   echo "🤖 Launching interactive CLI TUI..."
-  "${RUN_CMD[@]}" -it --rm \
-    "${CONTAINER_RUN_ARGS[@]}" \
-    -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG" \
-    "${ENV_ARGS[@]}" \
-    "${VOLUMES[@]}" \
-    "$IMAGE_NAME:$TAG" \
-    "$CLI_COMMAND" "${CMD_ARGS[@]}"
+fi
+
+# The assembled invocation is otherwise invisible to the test suite, which is
+# why the stdin/TTY and volume-path regressions went unnoticed.
+if [ "$AGENT_TESTING" = "true" ]; then
+  echo "🧪 Container flags: ${STDIN_ARGS[*]}"
+  echo "🧪 Volumes: ${VOLUMES[*]}"
+fi
+
+if [ "$STREAMING" = true ]; then
+  set -o pipefail
+  STDBUF_PREFIX=""
+  if command -v stdbuf >/dev/null 2>&1; then
+    STDBUF_PREFIX="stdbuf -oL"
+  fi
+  $STDBUF_PREFIX "${RUN_CMD[@]}" "${DOCKER_ARGS[@]}" < /dev/null | python3 -u "$ENGINE_DIR/$STREAM_FORMATTER"
+else
+  "${RUN_CMD[@]}" "${DOCKER_ARGS[@]}"
 fi
 
 EXIT_CODE=$?
