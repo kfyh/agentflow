@@ -34,6 +34,7 @@ WORKDIR /workspace
 
 # Update PATH to include node user's local bin where claude installer puts the binary
 ENV PATH="/home/node/.local/bin:$PATH"
+ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 
 # Install Claude Code CLI as the node user
 RUN curl -fsSL https://claude.ai/install.sh | bash
