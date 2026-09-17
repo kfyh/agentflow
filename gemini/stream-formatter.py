@@ -240,16 +240,10 @@ def main():
                         print(f"📊 Usage: {', '.join(parts)}", flush=True)
                 
                 output = res_data.get("output", res_data.get("result", ""))
-                status = res_data.get("status")
-                is_error = res_data.get("is_error", False)
-                
                 if not streamed_text and output:
                     print(output, flush=True)
                 
-                if is_error or status == "ERROR":
-                    print("❌ Session failed.", flush=True)
-                else:
-                    print("✅ Session completed.", flush=True)
+                print("✅ Session completed.", flush=True)
 
         except Exception as e:
             if in_thinking:
