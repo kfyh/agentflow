@@ -7,7 +7,7 @@ class TestRunner(unittest.TestCase):
         # Create a clean environment copy and clear any vendor API keys
         # to ensure deterministic authentication failure tests.
         self.test_env = os.environ.copy()
-        for key in ["GEMINI_API_KEY", "MISTRAL_API_KEY", "ANTHROPIC_API_KEY"]:
+        for key in ["GEMINI_API_KEY", "MISTRAL_API_KEY", "ANTHROPIC_API_KEY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"]:
             self.test_env.pop(key, None)
         self.test_env["AGENT_TESTING"] = "true"
 
@@ -31,7 +31,7 @@ class TestRunner(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("is not a valid driver config", result.stdout)
         # Engines are discovered from the vendor folders holding an agent.conf
-        for engine in ["claude", "gemini", "mistral"]:
+        for engine in ["claude", "copilot", "gemini", "mistral"]:
             self.assertIn(engine, result.stdout.split("Available engines:")[1])
 
     def test_run_without_credentials(self):
@@ -293,4 +293,3 @@ class TestRunner(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
