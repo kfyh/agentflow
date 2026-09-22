@@ -1,6 +1,6 @@
 # Multi-Vendor Agentic Coder Docker Templates (Colima Compatible)
 
-An isolated, secure containerized development environment framework designed specifically for running autonomous coding agents on your local web applications. It supports multiple LLM CLI agents (Gemini, Claude, Mistral) via a pluggable, unified runner interface and shares a single global safety guidelines configuration.
+An isolated, secure containerized development environment framework designed specifically for running autonomous coding agents on your local web applications. It supports multiple LLM CLI agents (Gemini, Claude, Mistral, Copilot) via a pluggable, unified runner interface and shares a single global safety guidelines configuration.
 
 ### 💡 Why Colima? (Enterprise Licensing Benefits)
 Docker Desktop requires a paid subscription for commercial use in larger organizations (defined as **more than 250 employees OR more than $10 million in annual revenue**). 
@@ -34,11 +34,15 @@ The project is structured with a centralized runner at the root and one self-con
 │   ├── Dockerfile               # Mistral (Vibe CLI) Docker build
 │   ├── agent.conf               # Mistral driver config (Bash)
 │   └── agent.psd1               # Mistral driver config (PowerShell)
-└── claude/
-    ├── Dockerfile               # Claude (Claude Code CLI) Docker build
-    ├── agent.conf               # Claude driver config (Bash)
-    ├── agent.psd1               # Claude driver config (PowerShell)
-    └── stream-formatter.py      # Claude stream-json renderer
+├── claude/
+│   ├── Dockerfile               # Claude (Claude Code CLI) Docker build
+│   ├── agent.conf               # Claude driver config (Bash)
+│   ├── agent.psd1               # Claude driver config (PowerShell)
+│   └── stream-formatter.py      # Claude stream-json renderer
+└── copilot/
+    ├── Dockerfile               # GitHub Copilot CLI Docker build
+    ├── agent.conf               # Copilot driver config (Bash)
+    └── agent.psd1               # Copilot driver config (PowerShell)
 ```
 
 ### Driver argument contract
@@ -123,7 +127,7 @@ run-agent.sh [options] [workspace_path] [prompt_arguments]
 ```
 
 ### Options:
-* `-c | --container | --engine <name>`: The engine driver to load from the matching vendor folder (`gemini`, `claude`, `mistral`). Defaults to `gemini`.
+* `-c | --container | --engine <name>`: The engine driver to load from the matching vendor folder (`gemini`, `claude`, `mistral`, `copilot`). Defaults to `gemini`.
 * `-r | --role | --mode <role>`: The execution role (`coder`, `design`, `spec`). Defaults to `coder`.
 * `-p | --prompt <string>`: Directly passes the prompt.
 * `-t | --tui`: Delivers the prompt to the interactive TUI instead of running headless. No effect without a prompt.
@@ -158,6 +162,13 @@ Ensure **Colima** (or your local Docker daemon) is active on your host machine: 
 * **Known limitation — interactive mode re-prompts for folder trust.** The CLI keeps its per-directory trust decision and onboarding flags in `~/.claude.json`, which sits *beside* `~/.claude` rather than inside it, so that file is not persisted and the "Do you trust the files in this folder?" dialog appears on every interactive run. This is deliberate: the CLI is installed under `~/.local/bin`, so persisting the whole home directory would shadow the binary and a rebuilt image would keep running the old CLI. Disposable images are worth more than skipping one dialog. Prompted runs are unaffected — print mode skips the trust gate entirely.
   * In that dialog, trust the `❯` cursor position rather than the highlight: on low-contrast themes the selected row can look greyed out, and confirming the default "No, exit" makes the CLI exit cleanly with code 1 and no error message.
 
+### 4. Copilot (GitHub Copilot CLI)
+* **Command:** `copilot`
+* **Auth Modes:**
+  - **API Key / PAT:** Export `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` on your host.
+  - **GitHub OAuth:** Unset token environment variables on your host and run interactively via `run-agent.sh -c copilot .` to complete GitHub authentication.
+* **Volume Persistence:** Mounts named volume `agentic-coder-copilot` to `/home/node/.copilot` to save session tokens and CLI state.
+
 ---
 
 ## 💻 Zsh Aliases for Easy Execution
@@ -172,6 +183,7 @@ alias run-agent='"/Users/localkevin/workspace/Agentic Docker Image/run-agent.sh"
 alias agy-run='run-agent -c gemini'
 alias vibe-run='run-agent -c mistral'
 alias claude-run='run-agent -c claude'
+alias copilot-run='run-agent -c copilot'
 
 # Read-Only Specification/Design Mode
 alias spec-run='run-agent -r design'
