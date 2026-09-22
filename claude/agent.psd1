@@ -30,10 +30,10 @@
     # pin the binary in state that outlives `docker rmi` — a rebuilt image would
     # keep running the old CLI. Rebuilding must be a complete reset.
     #
-    # The accepted cost: ~/.claude.json sits beside this directory rather than
-    # in it, and holds per-directory trust plus onboarding state, so interactive
-    # TUI runs re-prompt for folder trust. Prompted runs are unaffected — print
-    # mode skips the gate and reads credentials from ~/.claude/.credentials.json.
+    # CLAUDE_CONFIG_DIR=/home/node/.claude is set in Dockerfile to direct
+    # global configuration (~/.claude.json, credentials, directory trust, and settings)
+    # into /home/node/.claude inside the persistent volume, preventing credential loss
+    # and re-prompting for folder trust across container runs.
     Volumes            = @(
         "agentic-coder-claude:/home/node/.claude"
     )
