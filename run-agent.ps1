@@ -221,6 +221,12 @@ if (-not $IsEnvAuth) {
     Write-Host "ℹ️  Authentication tokens will be securely saved in persistent Docker volumes."
 }
 
+# --- Static Container Environment (declared per-driver, e.g. CLAUDE_CONFIG_DIR) ---
+$RunEnvArgs = @()
+foreach ($pair in $Config.RunEnv) {
+    $RunEnvArgs += @("-e", $pair)
+}
+
 # Resolve Volume Arguments
 $VolumeArgs = @()
 foreach ($vol in $Config.Volumes) {
@@ -311,6 +317,7 @@ if ($VerboseMode -and $Config.VerboseFlag -and ($CmdArgs -notcontains $Config.Ve
 # Assemble docker execution arguments
 $DockerArgs = @("run") + $StdinArgs + @("--rm", "-v", "${ResolvedPath}:/workspace:${WorkspaceMountFlag}")
 if ($EnvArgs) { $DockerArgs += $EnvArgs }
+if ($RunEnvArgs) { $DockerArgs += $RunEnvArgs }
 if ($VolumeArgs) { $DockerArgs += $VolumeArgs }
 $DockerArgs += @("$($Config.ImageName):$($Config.Tag)")
 $DockerArgs += @($Config.CliCommand)
@@ -327,6 +334,7 @@ if ($HasPrompt) {
 if ($env:AGENT_TESTING -eq "true") {
     Write-Host "🧪 Container flags: $($StdinArgs -join ' ')"
     Write-Host "🧪 Volumes: $($Config.Volumes -join ' ')"
+    Write-Host "🧪 Run env: $($RunEnvArgs -join ' ')"
 }
 
 # Run docker

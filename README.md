@@ -59,6 +59,8 @@ A driver declares the CLI arguments for each invocation mode, so the runner hold
 
 The standalone token `{{PROMPT}}` in any mode array is replaced with the final prompt text (prompt plus guidelines). A mode array without the token never receives a prompt. `ENV_FILE` / `EnvFile` optionally names a host env file to load before the auth check (a leading `~` is expanded in the PowerShell driver).
 
+`RUN_ENV` / `RunEnv` optionally declares static `NAME=value` pairs that the runner forwards as `-e NAME=value` on every container run, alongside whatever `ENV_VARS` forwards for API-key authentication. This is for state that must be set unconditionally — regardless of auth mode or whether the image was built before the setting existed — such as Claude's `CLAUDE_CONFIG_DIR`. A driver that omits it behaves exactly as before.
+
 ### Driver stdin/TTY contract
 
 A driver also declares the container stdin flags for each mode, so the runner holds no assumptions about which modes need a terminal:
@@ -158,9 +160,9 @@ Ensure **Colima** (or your local Docker daemon) is active on your host machine: 
 * **Auth Modes:**
   - **API Key:** Export `ANTHROPIC_API_KEY="your_key"` on your host.
   - **Anthropic OAuth:** Unset `ANTHROPIC_API_KEY` and run interactively to copy-paste browser OAuth credentials.
-* **Volume Persistence:** Mounts named volume `agentic-coder-claude` to `/home/node/.claude`, which holds the OAuth credentials (`.credentials.json`) and settings.
-* **Known limitation — interactive mode re-prompts for folder trust.** The CLI keeps its per-directory trust decision and onboarding flags in `~/.claude.json`, which sits *beside* `~/.claude` rather than inside it, so that file is not persisted and the "Do you trust the files in this folder?" dialog appears on every interactive run. This is deliberate: the CLI is installed under `~/.local/bin`, so persisting the whole home directory would shadow the binary and a rebuilt image would keep running the old CLI. Disposable images are worth more than skipping one dialog. Prompted runs are unaffected — print mode skips the trust gate entirely.
-  * In that dialog, trust the `❯` cursor position rather than the highlight: on low-contrast themes the selected row can look greyed out, and confirming the default "No, exit" makes the CLI exit cleanly with code 1 and no error message.
+* **Volume Persistence:** Mounts named volume `agentic-coder-claude` to `/home/node/.claude`. The runner sets `CLAUDE_CONFIG_DIR=/home/node/.claude` as a container environment variable at run time (via the `RUN_ENV` driver key, in addition to the Dockerfile's build-time `ENV`), which pins the CLI's config dir regardless of image age or container user. That directs `.credentials.json`, `.claude.json` (onboarding, theme, per-directory folder trust) and `settings.json` all into the mounted volume, so authentication, onboarding and the "Do you trust the files in this folder?" decision all persist across `--rm` runs. Prompted (non-interactive) runs are unaffected either way — print mode skips the trust gate entirely.
+  * In that trust dialog, trust the `❯` cursor position rather than the highlight: on low-contrast themes the selected row can look greyed out, and confirming the default "No, exit" makes the CLI exit cleanly with code 1 and no error message.
+  * Console keyless sign-in profiles (if you use one) live in `~/.config/anthropic`, outside `CLAUDE_CONFIG_DIR`, and are not persisted by this setup. This project's supported auth paths are OAuth and `ANTHROPIC_API_KEY`, so this is out of scope.
 
 ### 4. Copilot (GitHub Copilot CLI)
 * **Command:** `copilot`
