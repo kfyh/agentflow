@@ -70,6 +70,7 @@ STDIN_INTERACTIVE=()
 STDIN_TUI=()
 STDIN_HEADLESS=()
 STDIN_STREAM=()
+RUN_ENV=()
 ENGINE_DIR="$SCRIPT_DIR/$ENGINE"
 CONF_FILE="$ENGINE_DIR/agent.conf"
 if [ ! -f "$CONF_FILE" ]; then
@@ -191,6 +192,12 @@ if [ "$IS_ENV_AUTH" = false ]; then
   echo "👤 Mode: OAuth / Local Credentials Authentication (no API key detected in host environment)"
   echo "ℹ️  Authentication tokens will be securely saved in persistent Docker volumes."
 fi
+
+# --- Static Container Environment (declared per-driver, e.g. CLAUDE_CONFIG_DIR) ---
+RUN_ENV_ARGS=()
+for pair in "${RUN_ENV[@]}"; do
+  RUN_ENV_ARGS+=("-e" "$pair")
+done
 
 # --- Check for prompt.txt or prompt.md if no command line prompt was provided ---
 if [ "$HAS_PROMPT" = false ]; then
@@ -381,6 +388,7 @@ DOCKER_ARGS=(
   "${CONTAINER_RUN_ARGS[@]}"
   -v "$HOST_PATH:/workspace:$WORKSPACE_MOUNT_FLAG"
   "${ENV_ARGS[@]}"
+  "${RUN_ENV_ARGS[@]}"
   "${VOLUMES[@]}"
   "$IMAGE_NAME:$TAG"
   "$CLI_COMMAND" "${CMD_ARGS[@]}"
@@ -397,6 +405,7 @@ fi
 if [ "$AGENT_TESTING" = "true" ]; then
   echo "🧪 Container flags: ${STDIN_ARGS[*]}"
   echo "🧪 Volumes: ${VOLUMES[*]}"
+  echo "🧪 Run env: ${RUN_ENV_ARGS[*]}"
 fi
 
 if [ "$STREAMING" = true ]; then

@@ -152,6 +152,13 @@ class TestRunner(unittest.TestCase):
                 return line.split("Container flags:")[1].strip()
         self.fail(f"Runner did not report container flags:\n{stdout}")
 
+    def _run_env(self, stdout):
+        """Extracts the static -e NAME=value args the runner assembled for the container."""
+        for line in stdout.splitlines():
+            if "Run env:" in line:
+                return line.split("Run env:")[1].strip()
+        self.fail(f"Runner did not report run env:\n{stdout}")
+
     def test_interactive_mode_requests_a_tty(self):
         """No prompt means the bare interactive TUI, which cannot run without a PTY.
 
@@ -220,6 +227,42 @@ class TestRunner(unittest.TestCase):
                 )
                 self.assertNotIn(':/home/node"', body, msg)
                 self.assertNotIn(":/home/node'", body, msg)
+
+    def test_claude_run_env_sets_config_dir_in_interactive_and_tui_modes(self):
+        """CLAUDE_CONFIG_DIR must be pinned at run time, not just build time.
+
+        An image built before the Dockerfile declared the ENV, or a Podman run
+        under --userns=keep-id with no passwd home for the mapped UID, would
+        otherwise write .claude.json outside the persisted volume.
+        """
+        no_prompt_output = self._run("-c", "claude", ".")
+        self.assertEqual("-e CLAUDE_CONFIG_DIR=/home/node/.claude", self._run_env(no_prompt_output))
+
+        tui_output = self._run("-c", "claude", "-p", "test prompt", "--tui")
+        self.assertEqual("-e CLAUDE_CONFIG_DIR=/home/node/.claude", self._run_env(tui_output))
+
+    def test_claude_run_env_sets_config_dir_in_headless_and_streamed_modes(self):
+        """Prompted runs also need a stable config dir, not only the bare TUI."""
+        streamed_output = self._run("-c", "claude", "-p", "test prompt")
+        self.assertEqual("-e CLAUDE_CONFIG_DIR=/home/node/.claude", self._run_env(streamed_output))
+
+    def test_driver_without_run_env_produces_no_stray_env_args(self):
+        """A driver that declares no RUN_ENV must behave exactly as before.
+
+        Gemini is the control: it declares no RUN_ENV, so no -e flags beyond
+        whatever ENV_VARS contributes for API-key auth should appear.
+        """
+        output = self._run("-c", "gemini", "-p", "test prompt")
+        self.assertEqual("", self._run_env(output))
+
+    def test_claude_powershell_driver_declares_matching_run_env(self):
+        """The PowerShell driver must declare the same CLAUDE_CONFIG_DIR as the Bash one."""
+        with open("claude/agent.conf") as f:
+            conf_body = f.read()
+        with open("claude/agent.psd1") as f:
+            psd1_body = f.read()
+        self.assertIn('RUN_ENV=("CLAUDE_CONFIG_DIR=/home/node/.claude")', conf_body)
+        self.assertIn('RunEnv             = @("CLAUDE_CONFIG_DIR=/home/node/.claude")', psd1_body)
 
     def test_claude_persists_its_credentials_directory(self):
         """Credentials live in ~/.claude/.credentials.json and must outlive --rm.

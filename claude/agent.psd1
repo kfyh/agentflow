@@ -25,15 +25,20 @@
     StdinStream        = @("-i")
 
     EnvVars            = @("ANTHROPIC_API_KEY")
+    # Set at container run time (not just in the Dockerfile's ENV) so a stale
+    # image built before this was added, or a Podman run under --userns=keep-id
+    # with no passwd home for the mapped UID, still routes CLI state correctly.
+    RunEnv             = @("CLAUDE_CONFIG_DIR=/home/node/.claude")
     # Deliberately scoped to ~/.claude, not the whole home directory: the CLI is
     # installed under ~/.local/bin, so a mount at /home/node would shadow it and
     # pin the binary in state that outlives `docker rmi` — a rebuilt image would
     # keep running the old CLI. Rebuilding must be a complete reset.
     #
-    # CLAUDE_CONFIG_DIR=/home/node/.claude is set in Dockerfile to direct
-    # global configuration (~/.claude.json, credentials, directory trust, and settings)
-    # into /home/node/.claude inside the persistent volume, preventing credential loss
-    # and re-prompting for folder trust across container runs.
+    # CLAUDE_CONFIG_DIR=/home/node/.claude (set via RunEnv above, and also in the
+    # Dockerfile for manual `docker run` usage) directs global configuration
+    # (~/.claude.json, credentials, directory trust, and settings) into
+    # /home/node/.claude inside the persistent volume, preventing credential loss
+    # and re-prompting for folder trust/onboarding across container runs.
     Volumes            = @(
         "agentic-coder-claude:/home/node/.claude"
     )
